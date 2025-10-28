@@ -20,15 +20,21 @@ class Program
 			Console.WriteLine(input);
 		}
 
-		// Теги, які потрібно знайти
+	// Теги, які потрібно знайти
 		string[] tags = { "html", "form", "h1" };
 		var missing = new System.Collections.Generic.List<string>();
 
+	// (Увімкніть додатковий вивід для налагодження, якщо потрібно)
+
 		foreach (var tag in tags)
 		{
-			// Шукаємо відкриваючий тег з можливими пробілами, атрибутами і незалежно від регістру
-			string pattern = $"<\\s*{tag}\\b[^>]*>";
-			if (!Regex.IsMatch(input, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline))
+			// Строгіший шаблон: перевіряємо відкриваючий або закриваючий тег
+			// - /? допускає як відкриваючі, так і закриваючі теги
+			// - \b гарантує межу після імені тега (не знайде частини слів)
+			// - Заміна жадібного [^>]* на нежадібний [^>]*? щоб уникнути переузгодження між тегами
+			string pattern = $"<\\s*/?\\s*{tag}\\b[^>]*?>";
+			var options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+			if (!Regex.IsMatch(input, pattern, options))
 			{
 				missing.Add(tag);
 			}
@@ -41,6 +47,42 @@ class Program
 		else
 		{
 			Console.WriteLine("Результат: Текст НЕ містить необхідних HTML-тегів. Відсутні: " + string.Join(", ", missing.ConvertAll(s => $"<{s}>") ) );
+		}
+
+		// Додаткові детектори: одночасне знаходження різних шаблонів (приклад: ORCID та IPv4)
+		var detectors = new System.Collections.Generic.Dictionary<string, string>()
+		{
+			// ORCID: 4 групи по 4 символи, останній символ може бути цифрою або 'X' (checksum)
+			{ "ORCID", @"\b\d{4}-\d{4}-\d{4}-\d{3}[\dX]\b" },
+			// IPv4: строгий шаблон для чисел 0-255
+			{ "IPv4", @"\b(?:(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|1?\d{1,2})\b" }
+		};
+
+		var regexOptions = RegexOptions.CultureInvariant;
+
+		Console.WriteLine();
+		Console.WriteLine("Детектори шаблонів:");
+		foreach (var kv in detectors)
+		{
+			string name = kv.Key;
+			string pattern = kv.Value;
+			var matches = Regex.Matches(input, pattern, regexOptions);
+			int total = matches.Count;
+			var unique = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+			foreach (System.Text.RegularExpressions.Match m in matches)
+			{
+				if (!string.IsNullOrEmpty(m.Value)) unique.Add(m.Value);
+			}
+
+			Console.WriteLine($"- {name}: знайдено {total}, унікальних значень: {unique.Count}");
+			if (unique.Count > 0)
+			{
+				Console.WriteLine("  Список унікальних:");
+				foreach (var v in unique)
+				{
+					Console.WriteLine($"    {v}");
+				}
+			}
 		}
 	}
 }
