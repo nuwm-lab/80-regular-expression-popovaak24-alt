@@ -1,89 +1,101 @@
 using System;
 using System.Text.RegularExpressions;
 
-// Перевірка чи заданий текст містить HTML-теги <html>, <form>, <h1>
-// Використовуємо класи з простору імен System.Text.RegularExpressions
+
+// Перевірка: чи заданий текст є HTML-кодом і містить теги <html>, <form>, <h1>
 class Program
 {
-	static void Main()
-	{
-		Console.OutputEncoding = System.Text.Encoding.UTF8;
+    private const int MaxChars = 1_000_000; // Максимальна кількість символів для обробки
+    static void Main()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        // Зчитуємо ввід з обробкою виключень і обмеженням розміру
+        string input = string.Empty;
+        bool wasTruncated = false;
+        try
+        {
+            if (Console.IsInputRedirected)
+            {
+                // Безпечне читання великих потоків з обмеженням MaxChars
+                var sb = new System.Text.StringBuilder(Math.Min(65536, MaxChars));
+                var reader = Console.In;
+                var buffer = new char[8192];
+                int n;
+                while ((n = reader.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    int toAppend = Math.Min(n, MaxChars - sb.Length);
+                    if (toAppend > 0)
+                        sb.Append(buffer, 0, toAppend);
+                    if (sb.Length >= MaxChars)
+                    {
+                        wasTruncated = true;
+                        break; // припиняємо читання, решту ігноруємо
+                    }
+                }
+                input = sb.ToString();
+            }
+            else
+            {
+                // Читаємо один рядок, щоб не блокуватися очікуванням EOF
+                input = Console.ReadLine() ?? string.Empty;
+                if (input.Length > MaxChars)
+                {
+                    input = input.Substring(0, MaxChars);
+                    wasTruncated = true;
+                }
+            }
+        }
+        catch (System.IO.IOException ex)
+        {
+            Console.WriteLine("Помилка читання вводу: " + ex.Message);
+            return;
+        }
+        catch (OutOfMemoryException)
+        {
+            Console.WriteLine($"Помилка: вхідний текст занадто великий (> {MaxChars:N0} символів). Спробуйте подати менший фрагмент або файл частинами.");
+            return;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Непередбачена помилка при читанні вводу: " + ex.Message);
+            return;
+        }
+        // Якщо ввід пустий — підставимо приклад (щоб було з чим тестувати)
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            input = "<html><head><title>Приклад</title></head><body><h1>Заголовок</h1><form action=\"\">...</form></body></html>";
+            Console.WriteLine("(Використовується прикладовий текст, оскільки ввід пустий)");
+            Console.WriteLine(input);
+        }
+        else
+        {
+            if (wasTruncated)
+                Console.WriteLine($"Увага: текст занадто довгий. Оброблено лише перші {MaxChars:N0} символів.");
 
-		// Зчитуємо весь ввід — дозволяє вставляти багаторядковий текст у консоль
-		string input = Console.In.ReadToEnd();
+            // Виявлення проблем з кодуванням: символ U+FFFD (�) з'являється при некоректному декодуванні
+            if (input.IndexOf('\uFFFD') >= 0)
+                Console.WriteLine("Увага: виявлено символи заміни (�). Можливі проблеми з кодуванням вводу. Рекомендовано UTF-8 або PowerShell 7+.");
+        }
 
-		// Якщо ввід пустий — підставимо приклад (щоб було з чим тестувати)
-		if (string.IsNullOrWhiteSpace(input))
-		{
-			input = "<html><head><title>Приклад</title></head><body><h1>Заголовок</h1><form action=\"\">...</form></body></html>";
-			Console.WriteLine("(Використовується прикладовий текст, оскільки ввід пустий)");
-			Console.WriteLine(input);
-		}
-
-	// Теги, які потрібно знайти
-		string[] tags = { "html", "form", "h1" };
-		var missing = new System.Collections.Generic.List<string>();
-
-	// (Увімкніть додатковий вивід для налагодження, якщо потрібно)
-
-		foreach (var tag in tags)
-		{
-			// Строгіший шаблон: перевіряємо відкриваючий або закриваючий тег
-			// - /? допускає як відкриваючі, так і закриваючі теги
-			// - \b гарантує межу після імені тега (не знайде частини слів)
-			// - Заміна жадібного [^>]* на нежадібний [^>]*? щоб уникнути переузгодження між тегами
-			string pattern = $"<\\s*/?\\s*{tag}\\b[^>]*?>";
-			var options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
-			if (!Regex.IsMatch(input, pattern, options))
-			{
-				missing.Add(tag);
-			}
-		}
-
-		if (missing.Count == 0)
-		{
-			Console.WriteLine("Результат: Текст містить HTML-код — знайдено теги <html>, <form>, <h1>.");
-		}
-		else
-		{
-			Console.WriteLine("Результат: Текст НЕ містить необхідних HTML-тегів. Відсутні: " + string.Join(", ", missing.ConvertAll(s => $"<{s}>") ) );
-		}
-
-		// Додаткові детектори: одночасне знаходження різних шаблонів (приклад: ORCID та IPv4)
-		var detectors = new System.Collections.Generic.Dictionary<string, string>()
-		{
-			// ORCID: 4 групи по 4 символи, останній символ може бути цифрою або 'X' (checksum)
-			{ "ORCID", @"\b\d{4}-\d{4}-\d{4}-\d{3}[\dX]\b" },
-			// IPv4: строгий шаблон для чисел 0-255
-			{ "IPv4", @"\b(?:(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|1?\d{1,2})\b" }
-		};
-
-		var regexOptions = RegexOptions.CultureInvariant;
-
-		Console.WriteLine();
-		Console.WriteLine("Детектори шаблонів:");
-		foreach (var kv in detectors)
-		{
-			string name = kv.Key;
-			string pattern = kv.Value;
-			var matches = Regex.Matches(input, pattern, regexOptions);
-			int total = matches.Count;
-			var unique = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-			foreach (System.Text.RegularExpressions.Match m in matches)
-			{
-				if (!string.IsNullOrEmpty(m.Value)) unique.Add(m.Value);
-			}
-
-			Console.WriteLine($"- {name}: знайдено {total}, унікальних значень: {unique.Count}");
-			if (unique.Count > 0)
-			{
-				Console.WriteLine("  Список унікальних:");
-				foreach (var v in unique)
-				{
-					Console.WriteLine($"    {v}");
-				}
-			}
-		}
-	}
+        // Перевірка наявності HTML-тегів <html>, <form>, <h1>
+        string[] tags = { "html", "form", "h1" };
+        var missing = new System.Collections.Generic.List<string>();
+        foreach (var tag in tags)
+        {
+            // Шукаємо відкриваючий тег з можливими пробілами, атрибутами і незалежно від регістру
+            string pattern = $"<\\s*{tag}\\b[^>]*>";
+            if (!Regex.IsMatch(input, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline))
+            {
+                missing.Add(tag);
+            }
+        }
+        if (missing.Count == 0)
+        {
+            Console.WriteLine("Результат: Текст містить HTML-код — знайдено теги <html>, <form>, <h1>.");
+        }
+        else
+        {
+            Console.WriteLine("Результат: Текст НЕ містить необхідних HTML-тегів. Відсутні: " + string.Join(", ", missing.ConvertAll(s => $"<{s}>") ) );
+        }
+    }
 }
-
